@@ -43,7 +43,7 @@ Introduce **Terraform** como herramienta de infraestructura como código para ge
 
 Ideal para entender cómo reemplazar los comandos manuales de `kind` por un flujo declarativo y reproducible.
 
-→ [Ver README de cluster2](cluster2/README.md)
+→ [Ver README de cluster2](cluster2/Readme.md)
 
 ---
 
@@ -63,7 +63,7 @@ La configuración más completa del repositorio. Combina Terraform, Kind, Nginx 
 
 Ideal para simular un entorno de desarrollo completo con acceso HTTP/HTTPS desde `localhost`.
 
-→ [Ver README de cluster3](cluster3/README.md)
+→ [Ver README de cluster3](cluster3/Readme.md)
 
 ---
 
