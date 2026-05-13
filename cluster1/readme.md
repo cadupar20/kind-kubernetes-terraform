@@ -79,6 +79,15 @@ Set kubectl context to "kind-mi-cluster"
 
 ```sh
 kubectl cluster-info --context kind-mi-cluster
+```
+
+Salida esperada:
+```sh
+Kubernetes control plane is running at https://127.0.0.1:64634
+CoreDNS is running at https://127.0.0.1:64634/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy
+```
+
+```sh
 kubectl get nodes
 ```
 
@@ -97,6 +106,36 @@ mi-cluster-worker2         Ready    <none>          2m    v1.33.1
 kubectl apply -f deployment.yaml
 kubectl apply -f service.yaml
 ```
+
+Verificar los pods creados:
+
+```sh
+kubectl get pods
+```
+
+```
+NAME                    READY   STATUS    RESTARTS   AGE
+nginx-545cdc766-8smwj   1/1     Running   0          18s
+nginx-545cdc766-hpxdm   1/1     Running   0          18s
+```
+
+Verificar los servicios:
+```sh
+kubectl get services
+```
+
+```
+NAME         TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE
+kubernetes   ClusterIP   10.96.0.1    <none>        443/TCP   9m31s
+```
+Una vez ejecutado el comando | `kubectl apply -f service.yaml` | se agregará el servicio ngnix *:
+
+```
+NAME         TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
+kubernetes   ClusterIP   10.96.0.1       <none>        443/TCP        11m
+nginx *      NodePort    10.96.189.159   <none>        80:30891/TCP   5s
+```
+
 
 Verificar los recursos creados:
 
@@ -122,45 +161,195 @@ Obtener la IP del nodo control-plane:
 
 ```sh
 docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' mi-cluster-control-plane
+172.18.0.3
 ```
 
-Luego acceder desde el navegador usando la IP obtenida y el puerto NodePort asignado (ej: `30602`):
-
-```
-http://<IP_CONTROL_PLANE>:<NODEPORT>
-```
-
-### 5. Instalar Ingress Controller (opcional)
+Obtener las IPs de mis workers:
+```sh
+docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' mi-cluster-worker
+172.18.0.2
 
 ```sh
-kubectl apply -f https://kind.sigs.k8s.io/examples/ingress/usage.yaml
-
-# Etiquetar los nodos para que el ingress controller pueda desplegarse
-kubectl label node --all ingress-ready=true
+docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' mi-cluster-worker2
+172.18.0.4
 ```
 
-Esperar a que el pod del ingress controller esté en estado `Running`:
+__Ver todos los nodos con su IP y el NodePort__:
+
+```sh
+kubectl get nodes -o wide
+
+NAME                       STATUS   ROLES           AGE   VERSION   INTERNAL-IP   EXTERNAL-IP   OS-IMAGE                         KERNEL-VERSION                     CONTAINER-RUNTIME
+mi-cluster-control-plane   Ready    control-plane   12m   v1.35.0   172.18.0.3    <none>        Debian GNU/Linux 12 (bookworm)   6.6.87.2-microsoft-standard-WSL2   containerd://2.2.0
+mi-cluster-worker          Ready    <none>          12m   v1.35.0   172.18.0.2    <none>        Debian GNU/Linux 12 (bookworm)   6.6.87.2-microsoft-standard-WSL2   containerd://2.2.0
+mi-cluster-worker2         Ready    <none>          12m   v1.35.0   172.18.0.4    <none>        Debian GNU/Linux 12 (bookworm)   6.6.87.2-microsoft-standard-WSL2   containerd://2.2.0
+```
+
+Si querés acceder desde tu máquina local (fuera del clúster Kind), necesitás mapear un puerto de tu host al contenedor Docker del nodo. Kind por defecto no expone puertos de los nodos workers. Una opción es usar `port-forward`:
+
+```sh
+kubectl port-forward svc/nginx 8080:80
+```
+
+Y luego acceder desde un navegador.  `http://localhost:8080`.
+
+Nota: Se puede hacer kill del proceso `kubectl port-forward svc/nginx 8080:80` para finalizar el port-forward.
+
+### 5. Instalar el NGINX Ingress Controller en Kind (opcional)
+
+```sh
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+# Este manifiesto está __específicamente adaptado para Kind__ y configura todo lo necesario (namespace, deployment, service tipo NodePort, etc.).
+
+namespace/ingress-nginx created
+serviceaccount/ingress-nginx created
+serviceaccount/ingress-nginx-admission created
+role.rbac.authorization.k8s.io/ingress-nginx created
+role.rbac.authorization.k8s.io/ingress-nginx-admission created
+clusterrole.rbac.authorization.k8s.io/ingress-nginx created
+clusterrole.rbac.authorization.k8s.io/ingress-nginx-admission created
+rolebinding.rbac.authorization.k8s.io/ingress-nginx created
+rolebinding.rbac.authorization.k8s.io/ingress-nginx-admission created
+clusterrolebinding.rbac.authorization.k8s.io/ingress-nginx created
+clusterrolebinding.rbac.authorization.k8s.io/ingress-nginx-admission created
+configmap/ingress-nginx-controller created
+service/ingress-nginx-controller created
+service/ingress-nginx-controller-admission created
+deployment.apps/ingress-nginx-controller created
+job.batch/ingress-nginx-admission-create created
+job.batch/ingress-nginx-admission-patch created
+ingressclass.networking.k8s.io/nginx created
+validatingwebhookconfiguration.admissionregistration.k8s.io/ingress-nginx-admission created
+
+
+# Etiquetar los nodos para que el ingress controller pueda desplegarse
+# Kind requiere que los nodos tengan una etiqueta especial para que el Ingress Controller pueda desplegarse correctamente:
+kubectl label node --all ingress-ready=true
+
+node/mi-cluster-control-plane not labeled
+node/mi-cluster-worker not labeled
+node/mi-cluster-worker2 not labeled
+```
+
+Esperar a que el Ingress Controller esté listo
+```sh
+kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=90s
+
+pod/ingress-nginx-controller-56dc4b4c6-mwlqp condition met
+```
+
+Verificar que el pod este corriendo
 
 ```sh
 kubectl get pods -n ingress-nginx
 ```
 
+Deberías ver algo como:
+```sh
+NAME                                       READY   STATUS    RESTARTS   AGE
+ingress-nginx-controller-xxxxxxxxx-xxxxx   1/1     Running   0          7m6s
+```
+
 ### 6. Crear el recurso Ingress
 
-El archivo `ingress.yaml` usa [nip.io](https://nip.io/) para resolver el nombre de host sin necesidad de DNS:
+El archivo `ingress.yaml` usa [nip.io](https://nip.io/) para resolver el nombre de host sin necesidad de DNS.
 
+Antes de aplicarlo, asegurate de que el `host` contenga la IP real del nodo control-plane:
+
+Obtener la IP del nodo control-plane:
+```sh
+docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' mi-cluster-control-plane
+```
+
+Salida esperada (la IP puede variar):
+```
+172.18.0.3
+```
+
+Actualizar el host en `ingress.yaml` con la IP obtenida (ej: `nginx.172.18.0.3.nip.io`):
+
+```yaml
+spec:
+  rules:
+  - host: nginx.172.18.0.3.nip.io
+```
+
+Aplicar el recurso Ingress:
 ```sh
 kubectl apply -f ingress.yaml
+```
+
+Verificar que se creó correctamente:
+```sh
 kubectl get ingress
 ```
 
-Acceder desde el navegador o curl:
-
-```sh
-curl http://nginx.172.20.0.4.nip.io
+Salida esperada:
+```
+NAME    CLASS    HOSTS                     ADDRESS     PORTS   AGE
+nginx   <none>   nginx.172.18.0.3.nip.io   localhost   80      6m
 ```
 
-> **Nota:** Reemplaza `172.20.0.4` con la IP real del nodo control-plane obtenida en el paso anterior.
+> El campo `ADDRESS` muestra `localhost` porque Kind asigna el Ingress Controller en el nodo control-plane accesible desde el host.
+
+### 7. Probar el acceso vía Ingress
+
+Hay dos formas de probar el Ingress:
+
+#### Opción A — Usando port-forward (recomendado desde Windows)
+
+El servicio del Ingress Controller expone los puertos HTTP (80) y HTTPS (443) mapeados a NodePorts. Con port-forward podés acceder desde tu máquina local:
+
+```sh
+# En una terminal
+kubectl port-forward -n ingress-nginx svc/ingress-nginx-controller 8080:80
+```
+
+En otra terminal, probar con curl usando el header `Host`:
+```sh
+curl -H "Host: nginx.172.18.0.3.nip.io" http://localhost:8080
+```
+
+O desde el navegador (con el port-forward activo solamente):
+```
+http://localhost:8080
+```
+
+#### Opción B — Usando la IP del nodo (dentro de la red Docker)
+
+```sh
+curl -H "Host: nginx.172.18.0.3.nip.io" http://172.18.0.3:30394
+```
+
+#### ¿Por qué se usa el header `Host`?
+
+El recurso Ingress define un `host` específico (`nginx.172.18.0.3.nip.io`). El Ingress Controller nginx enruta el tráfico según el header `Host` de la petición HTTP. Al enviar `-H "Host: nginx.172.18.0.3.nip.io"`, le indicamos al Ingress Controller a qué servicio debe dirigir el tráfico.
+
+> **Nota sobre nip.io:** El dominio `nginx.172.18.0.3.nip.io` resuelve automáticamente a la IP `172.18.0.3` gracias al servicio DNS público [nip.io](https://nip.io/). Esto evita tener que editar el archivo `/etc/hosts` o configurar un DNS local.
+
+#### Salida esperada de curl
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+...
+</html>
+```
+
+### 8. Detener el port-forward
+
+Para finalizar el `port-forward`, presioná `Ctrl + C` en la terminal donde se está ejecutando. Si se ejecutó en segundo plano:
+
+```sh
+# En Windows (cmd/PowerShell)
+tasklist | findstr kubectl
+taskkill /PID <PID> /F
+
+# En WSL / Linux / macOS
+pkill -f "kubectl port-forward"
+```
 
 ## Eliminar el clúster
 
